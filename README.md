@@ -17,8 +17,21 @@ sites, but everything runs on your own machine. There are no credits, no waterma
 | **AI Voiceover** | Narrate a script over your video, a background, or export MP3 only. | edge-tts |
 | **Auto Captions** | Burn 5 animated caption styles into any video, keep its size or convert it to 9:16, and export an `.srt`. | faster-whisper |
 | **Free Tools** | Trim, compress (to a target MB), GIF, speed, reverse, mute, MP3, MP4, merge, aspect ratio, volume boost, speech enhancer, loudness balance, frame grab | ffmpeg |
-| **Library** | Uploads, background gameplay, music, exports. Import from URL (yt-dlp). | |
+| **Library** | Uploads, background gameplay, music, exports. | |
 | **Calculators** | Views→money, CPM/RPM, posts to 1M views, clips per video, campaign payouts | |
+
+## Add videos from a link
+Every video picker has a link box. Paste or drag in a link and Clipland detects the site: YouTube (videos and Shorts),
+Twitch (VODs and clips), Kick, TikTok, X, Instagram, Facebook, Reddit, Vimeo, Streamable, Medal, Google Drive, Dropbox,
+direct `.mp4` links, and anything else [yt-dlp](https://github.com/yt-dlp/yt-dlp) supports. It shows the title, length
+and best available quality, then downloads the video and selects it.
+- **Long videos:** anything over 2 hours waits for you to choose a part, for example 1:20:00 → 1:50:00 of a stream, so
+  you don't pull a 10-hour VOD.
+- **Quality:** you can cap the quality (4K → 480p). H.264 is preferred because it decodes and edits fastest.
+- **No duplicates:** a link you've already downloaded is reused instead of downloaded again.
+- **Own lane:** downloads run alongside renders instead of waiting behind them.
+
+If a site stops working, update the downloader with `.venv/bin/python -m pip install -U yt-dlp` (or `uv pip install -U yt-dlp`).
 
 ## AutoClip content types
 Before clipping, pick the type of video. Each type has its own engine and settings, and your last settings are remembered per type:
@@ -86,6 +99,7 @@ app/transcribe.py        faster-whisper with word timestamps
 app/moments.py           podcast moment finder (LLM + heuristic)
 app/signals.py           gameplay/trailer highlight detection (audio, motion, cuts, reactions)
 app/presets.py           AutoClip content types and their defaults
+app/sources.py           link detection + yt-dlp downloads
 app/reframe.py           speaker-aware 9:16 reframing (YuNet, shot detection, split screen)
 app/captions.py          animated ASS caption styles
 app/tts.py               edge-tts with word timings

@@ -191,3 +191,17 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 .hd.n { left: calc(50% - 7px); top: -8px; cursor: ns-resize; } .hd.s { left: calc(50% - 7px); bottom: -8px; cursor: ns-resize; }
 .hd.w { top: calc(50% - 7px); left: -8px; cursor: ew-resize; } .hd.e { top: calc(50% - 7px); right: -8px; cursor: ew-resize; }
 .modal input[type=range] { flex: 1; min-width: 120px; }
+
+/* link import */
+.picker-wrap { display: flex; flex-direction: column; gap: 10px; }
+.link-row { position: relative; display: flex; align-items: center; }
+.link-row input { padding-right: 150px; }
+.src-badge { position: absolute; right: 8px; font-size: 12px; padding: 4px 9px; border-radius: 99px; background: #22222F; border: 1px solid var(--accent); color: var(--accent); white-space: nowrap; max-width: 140px; overflow: hidden; text-overflow: ellipsis; }
+.src-badge.bad { border-color: var(--danger); color: var(--danger); }
+.link-card { margin-top: 10px; border: 1px solid var(--line); background: var(--panel-2); border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+.link-head { display: flex; gap: 12px; align-items: center; }
+.link-head img, .link-head .ph { width: 112px; height: 63px; object-fit: cover; border-radius: 8px; flex: none; background: #000; display: flex; align-items: center; justify-content: center; font-size: 24px; }
+.link-head .name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 600px) { .link-row input { padding-right: 12px; } .src-badge { position: static; margin-left: 6px; } }
+.picker { flex-wrap: wrap; }
+.picker .info { min-width: 160px; }

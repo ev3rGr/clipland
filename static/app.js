@@ -166,6 +166,99 @@ function uploadFile(file, kind, onProgress) {
 }
 
 /** Big drag-and-drop video picker with library dropdown. */
+// ---------- paste a link: detect the site, preview, download ----------
+function linkImporter(kind, onImported) {
+  const input = h("input", { type: "url", placeholder: kind === "music" ? "…or paste a link (YouTube, SoundCloud, TikTok…)" : "…or paste a link: YouTube, Twitch, Kick, TikTok, X, Instagram, Drive, direct .mp4…" });
+  const badge = h("span", { class: "src-badge", style: { display: "none" } });
+  const card = h("div", { class: "link-card", style: { display: "none" } });
+  const AUTO_MAX = 2 * 3600;  // auto-download anything up to 2h; longer VODs wait for a click (pick a part first)
+  let seq = 0, timer = null, jobId = null;
+  const hms = (x) => { x = Math.round(x || 0); const hh = Math.floor(x / 3600), mm = Math.floor(x % 3600 / 60), ss = x % 60; return (hh ? hh + ":" + String(mm).padStart(2, "0") : mm) + ":" + String(ss).padStart(2, "0"); };
+  const reset = () => { badge.style.display = "none"; card.style.display = "none"; card.replaceChildren(); };
+
+  async function inspect() {
+    const url = input.value.trim();
+    const my = ++seq;
+    if (!url) return reset();
+    let d;
+    try { d = await api.get(`/api/url/detect?url=${encodeURIComponent(url)}`); } catch { return; }
+    if (my !== seq) return;
+    if (!d.ok) { badge.style.display = ""; badge.className = "src-badge bad"; badge.textContent = "Not a link"; card.style.display = "none"; return; }
+    badge.style.display = ""; badge.className = "src-badge"; badge.textContent = `${d.icon} ${d.label}${d.kind !== "video" ? " · " + d.kind : ""}`;
+    card.style.display = ""; card.replaceChildren(h("div", { class: "muted small" }, h("span", { class: "spin" }), ` Reading ${d.label} link…`));
+    if (d.kind === "live") return card.replaceChildren(h("p", { class: "err small" }, `That's a live channel page. Paste a VOD (e.g. twitch.tv/videos/…) or a clip link instead.`));
+    if (d.kind === "playlist") return card.replaceChildren(h("p", { class: "err small" }, "That's a playlist. Open one video and paste its link."));
+    let info;
+    try { info = await api.get(`/api/url/info?url=${encodeURIComponent(url)}`); } catch (e) { if (my === seq) card.replaceChildren(h("p", { class: "err small" }, e.message)); return; }
+    if (my !== seq) return;
+    drawCard(info, true);
+  }
+
+  function drawCard(info, auto) {
+    const quals = [["2160", "4K"], ["1440", "1440p"], ["1080", "1080p"], ["720", "720p"], ["480", "480p"]].filter(([q]) => !info.max_height || +q <= Math.max(480, info.max_height));
+    let quality = store.get("dl_quality", "1080");
+    if (!quals.some(([q]) => q === quality)) quality = quals[0]?.[0] || "1080";
+    const qSel = h("select", { style: { width: "auto" }, onchange: (e) => { quality = e.target.value; store.set("dl_quality", quality); } },
+      quals.map(([q, l]) => h("option", { value: q, selected: q === quality }, l)));
+    const long = info.duration && info.duration > AUTO_MAX;
+    const partChk = h("input", { type: "checkbox", checked: !!long, onchange: () => (partRow.style.display = partChk.checked ? "" : "none") });
+    const st = h("input", { type: "text", value: "0:00", style: { width: "90px" } });
+    const en = h("input", { type: "text", value: info.duration ? hms(Math.min(info.duration, long ? 3600 : info.duration)) : "", placeholder: "end", style: { width: "90px" } });
+    const partRow = h("div", { class: "btns", style: { display: long ? "" : "none", alignItems: "center" } }, h("span", { class: "muted small" }, "From"), st, h("span", { class: "muted small" }, "to"), en);
+    const status = h("div", { class: "muted small" });
+    const bar = h("i"); const prog = h("div", { class: "progress", style: { display: "none" } }, bar);
+    const dl = h("button", { class: "primary sm", onclick: () => start() }, "⬇ Download");
+    const cancel = h("button", { class: "sm", style: { display: "none" }, onclick: async () => { if (jobId) await api.post(`/api/jobs/${jobId}/cancel`).catch(() => {}); } }, "Cancel");
+    const useBtn = info.already ? h("button", { class: "violet sm", onclick: () => onImported(info.already) }, "Use the copy in your library") : null;
+    const meta = [info.uploader, info.duration ? hms(info.duration) : null, info.max_height ? `up to ${info.max_height}p` : null].filter(Boolean).join(" · ");
+    card.replaceChildren(...[
+      h("div", { class: "link-head" },
+        info.thumbnail ? h("img", { src: info.thumbnail, alt: "", referrerpolicy: "no-referrer" }) : h("div", { class: "ph" }, info.icon),
+        h("div", { style: { minWidth: 0, flex: 1 } },
+          h("div", { class: "name" }, info.title || input.value.trim()), h("div", { class: "muted small" }, `${info.icon} ${info.label}` + (meta ? " · " + meta : "")),
+          info.warning ? h("div", { class: "muted small" }, info.warning) : null,
+          info.is_live ? h("div", { class: "err small" }, "This is live right now. Only the part streamed so far can be downloaded; a finished VOD works better.") : null)),
+      kind === "music" ? null : h("div", { class: "btns", style: { alignItems: "center" } }, h("span", { class: "muted small" }, "Quality"), qSel,
+        h("label", { class: "check", style: { margin: 0 } }, partChk, "Only download a part")),
+      partRow,
+      long ? h("div", { class: "hint", style: { margin: 0 } }, `Long video (${hms(info.duration)}). Pick the part you want, or untick to download all of it.`) : null,
+      h("div", { class: "btns" }, dl, useBtn, cancel), prog, status].filter(Boolean));
+
+    async function start() {
+      const params = { url: info.url || input.value.trim(), kind, quality };
+      if (partChk.checked) { params.start = st.value.trim() || null; params.end = en.value.trim() || null; }
+      dl.disabled = true; cancel.style.display = ""; prog.style.display = ""; bar.style.width = "2%"; status.textContent = "Starting…";
+      let job;
+      try { job = await api.post("/api/jobs/import_url", { params }); } catch (e) { status.textContent = e.message; dl.disabled = false; return; }
+      jobId = job.id; trackJob(job, {});
+      while (true) {
+        await new Promise((r) => setTimeout(r, 800));
+        try { job = await api.get(`/api/jobs/${jobId}`); } catch { continue; }
+        bar.style.width = Math.max(2, job.progress * 100) + "%";
+        status.textContent = job.message || "";
+        if (job.status === "done") {
+          status.textContent = job.result.reused ? "Already downloaded. Using your copy." : "✓ Downloaded";
+          cancel.style.display = "none"; prog.style.display = "none";
+          onImported(job.result.file); input.value = ""; setTimeout(reset, 2500); break;
+        }
+        if (["error", "cancelled"].includes(job.status)) {
+          status.className = "err small"; status.textContent = job.status === "cancelled" ? "Cancelled" : job.error.replace(/^\w+Error: /, "");
+          cancel.style.display = "none"; prog.style.display = "none"; dl.disabled = false; break;
+        }
+      }
+      jobId = null;
+    }
+    if (auto && info.already) { status.textContent = "✓ Already in your library. Selected it."; onImported(info.already); }
+    else if (auto && !long && !info.is_live) start();
+  }
+
+  input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(inspect, 450); });
+  input.addEventListener("paste", () => { clearTimeout(timer); timer = setTimeout(inspect, 30); });
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { clearTimeout(timer); inspect(); } });
+  const el = h("div", { class: "link-import" }, h("div", { class: "link-row" }, input, badge), card);
+  return { el, setUrl: (u) => { input.value = u; inspect(); } };
+}
+
 function videoPicker(onChange, kind = "uploads") {
   const thumb = h("div", { class: "thumb" });
   const name = h("div", { class: "name" }, "No video selected");
@@ -203,11 +296,24 @@ function videoPicker(onChange, kind = "uploads") {
     prog.style.display = "none";
   };
   input.onchange = () => input.files[0] && doUpload(input.files[0]);
-  const el = h("div", { class: "picker" }, thumb, h("div", { class: "info" }, name, sub, prog),
+  const link = linkImporter(kind, async (ref) => {
+    await fill();
+    const f = S.files[kind].find((x) => x.ref === ref) || { ref, name: ref.split("/").pop().split("_").slice(1).join("_") };
+    try { Object.assign(f, await api.get(`/api/probe?ref=${encodeURIComponent(ref)}`)); } catch {}
+    choose(f);
+  });
+  const box = h("div", { class: "picker" }, thumb, h("div", { class: "info" }, name, sub, prog),
     h("div", { class: "btns" }, sel, h("button", { type: "button", class: "violet", onclick: () => input.click() }, "Upload"), input));
-  el.addEventListener("dragover", (e) => { e.preventDefault(); el.classList.add("drag"); });
-  el.addEventListener("dragleave", () => el.classList.remove("drag"));
-  el.addEventListener("drop", (e) => { e.preventDefault(); el.classList.remove("drag"); e.dataTransfer.files[0] && doUpload(e.dataTransfer.files[0]); });
+  const el = h("div", { class: "picker-wrap" }, box, link.el);
+  box.addEventListener("dragover", (e) => { e.preventDefault(); box.classList.add("drag"); });
+  box.addEventListener("dragleave", () => box.classList.remove("drag"));
+  box.addEventListener("drop", (e) => {
+    e.preventDefault(); box.classList.remove("drag");
+    if (e.dataTransfer.files[0]) return doUpload(e.dataTransfer.files[0]);
+    const u = (e.dataTransfer.getData("text/uri-list") || e.dataTransfer.getData("text/plain") || "").trim().split("\n")[0];
+    if (/^https?:\/\//.test(u)) link.setUrl(u);  // dragged a link from the browser
+  });
+  sub.textContent = "Drop a video or a link here, upload, or pick from your library";
   fill();
   w.el = el;
   return w;
@@ -776,14 +882,13 @@ PAGES.library = async (v, arg) => {
   v.append(h("div", { class: "tabs seg" }, [["uploads", "Videos"], ["backgrounds", "Backgrounds"], ["music", "Music"], ["outputs", "Exports"]].map(([k, l]) =>
     h("a", { href: "#/library/" + k }, h("button", { class: k === kind ? "on" : "" }, l)))));
   if (kind !== "outputs") {
-    const url = h("input", { type: "url", placeholder: "https://… (a video you own or have rights to use)" });
     const up = h("input", { type: "file", multiple: true, accept: kind === "music" ? "audio/*" : "video/*", hidden: true, onchange: async () => {
       for (const f of up.files) { try { await uploadFile(f, kind, (p) => (upBtn.textContent = `Uploading ${Math.round(p * 100)}%`)); } catch (e) { toast(e.message, true); } }
       upBtn.textContent = "Upload files"; route();
     } });
     const upBtn = h("button", { class: "violet", onclick: () => up.click() }, "Upload files");
-    const imp = h("button", { onclick: () => url.value && startJob("import_url", { url: url.value, kind }, { button: imp, onDone: () => { toast("Imported"); route(); } }) }, "Import from URL");
-    v.append(h("div", { class: "panel", style: { marginBottom: "18px" } }, h("div", { class: "row" }, upBtn, up, h("div", { class: "field", style: { flex: 3, marginBottom: 0 } }, url), imp),
+    const imp = linkImporter(kind, () => { toast("Imported"); setTimeout(route, 1200); });
+    v.append(h("div", { class: "panel", style: { marginBottom: "18px" } }, h("div", { class: "row", style: { alignItems: "flex-start" } }, upBtn, up, h("div", { style: { flex: 1, minWidth: "240px" } }, imp.el)),
       kind === "backgrounds" ? h("p", { class: "muted small", style: { marginBottom: 0 } }, "Tip: add a few long gameplay or satisfying clips here — story and text videos pick random segments from them.") : null));
   }
   let files = await loadFiles(kind, true);

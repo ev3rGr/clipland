@@ -45,7 +45,9 @@ class Job:
 
 _jobs: dict[str, Job] = {}
 _lock = threading.Lock()
-_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="job")
+_pool = ThreadPoolExecutor(max_workers=1, thread_name_prefix="job")        # GPU/CPU-heavy work, one at a time
+_net_pool = ThreadPoolExecutor(max_workers=2, thread_name_prefix="net")    # downloads don't block renders
+NET_KINDS = {"import_url"}
 _handlers = {}
 
 
@@ -82,7 +84,7 @@ def submit(kind: str, params: dict) -> Job:
     with _lock:
         _jobs[job.id] = job
     save(job)
-    _pool.submit(_run, job)
+    (_net_pool if kind in NET_KINDS else _pool).submit(_run, job)
     return job
 
 

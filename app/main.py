@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import jobs, llm, tts, captions, transcribe, settings, presets
+from . import jobs, llm, tts, captions, transcribe, settings, presets, sources
 from .config import FILE_KINDS, FONTS, OUTPUTS, STATIC, WORK, resolve_file
 from .media import probe, safe_name, thumbnail, encoder_name, run as run_cmd
 from .pipelines import autoclip, stories, tools  # noqa: F401  (registers job handlers)
@@ -115,6 +115,19 @@ async def upload(file: UploadFile = File(...), kind: str = Form("uploads")):
         (WORK / "thumbs").mkdir(exist_ok=True)
         thumbnail(dest, WORK / "thumbs" / f"{kind}_{dest.stem}.jpg", t=min(2.0, info["duration"] / 3))
     return {**_file_info(kind, dest), **info}
+
+
+@app.get("/api/url/detect")
+def url_detect(url: str):
+    return sources.detect(url)
+
+
+@app.get("/api/url/info")
+def url_info(url: str):
+    try:
+        return sources.info(url)
+    except ValueError as e:
+        raise HTTPException(400, str(e))
 
 
 @app.get("/api/probe")

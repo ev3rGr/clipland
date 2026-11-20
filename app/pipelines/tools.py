@@ -142,34 +142,7 @@ def _merge(job, files, o):
 
 
 @jobs.handler("import_url")
-def import_url_job(job, url, kind="uploads"):
-    """Download a video you have rights to (yt-dlp supports most sites)."""
-    dest = {"uploads": UPLOADS, "backgrounds": BACKGROUNDS, "music": MUSIC}[kind]
-    wd = work_dir(job)
-    job.update(0.05, "Downloading")
-    fmt = "bestaudio/best" if kind == "music" else "bv*[height<=1080][ext=mp4]+ba[ext=m4a]/b[height<=1080]/b"
-    cmd = [sys.executable, "-m", "yt_dlp", "--no-playlist", "-f", fmt, "--newline", "-o", str(wd / "%(title).80s.%(ext)s")]
-    if kind == "music":
-        cmd += ["-x", "--audio-format", "mp3"]
-    else:
-        cmd += ["--merge-output-format", "mp4"]
-    proc = subprocess.Popen(cmd + [url], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
-    tail = []
-    for line in proc.stdout:
-        tail = (tail + [line.strip()])[-8:]
-        if "[download]" in line and "%" in line:
-            try:
-                pct = float(line.split("%")[0].split()[-1])
-                job.update(0.05 + 0.9 * pct / 100, f"Downloading {pct:.0f}%")
-            except ValueError:
-                pass
-    if proc.wait() != 0:
-        raise RuntimeError("Download failed: " + " | ".join(tail[-3:]))
-    files = [f for f in wd.iterdir() if f.suffix.lower() in (".mp4", ".mkv", ".webm", ".mp3", ".m4a")]
-    if not files:
-        raise RuntimeError("Download produced no media file")
-    src = max(files, key=lambda f: f.stat().st_size)
-    import uuid
-    name = f"{uuid.uuid4().hex[:6]}_{safe_name(src.name)}"
-    src.rename(dest / name)
-    return {"file": f"{kind}/{name}", "outputs": []}
+def import_url_job(job, url, kind="uploads", quality="1080", start=None, end=None):
+    """Download a video you have rights to. The site is detected automatically (yt-dlp supports most sites)."""
+    from .. import sources
+    return sources.download(job, url, kind, quality, start, end)
