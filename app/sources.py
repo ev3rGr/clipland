@@ -152,10 +152,11 @@ def _friendly(msg):
         return "This video needs a login (age-restricted or members-only), so it can't be downloaded here."
     if "unsupported url" in m:
         return "This site isn't supported. Try a direct link to the video file."
-    if "not available" in m or "removed" in m or "404" in m:
+    if "not available" in m or "unavailable" in m or "removed" in m or "404" in m:
         return "This video isn't available (removed, region-locked or wrong link)."
     if "is offline" in m or "not currently live" in m:
         return "That channel isn't live. Paste a VOD or clip link instead."
+    msg = re.sub(r"^(ERROR:\s*)?(\[[\w:]+\]\s*[\w-]+:\s*)?", "", msg.strip())
     return msg[:300]
 
 

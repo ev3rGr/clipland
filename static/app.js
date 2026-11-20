@@ -168,10 +168,13 @@ function uploadFile(file, kind, onProgress) {
 /** Big drag-and-drop video picker with library dropdown. */
 // ---------- paste a link: detect the site, preview, download ----------
 function linkImporter(kind, onImported) {
-  const input = h("textarea", { rows: 1, class: "link-input", spellcheck: false,
-    placeholder: kind === "music" ? "…or paste links (YouTube, SoundCloud, TikTok…)" : "…or paste a link, several links, or a playlist/channel: YouTube, Twitch, Kick, TikTok, X, Instagram, Drive…" });
-  const grow = () => { input.style.height = "auto"; input.style.height = Math.min(160, input.scrollHeight) + "px"; };
+  const SITES = kind === "music" ? "YouTube, SoundCloud, TikTok, Bandcamp…" : "YouTube, Twitch, Kick, TikTok, X, Instagram, Facebook, Reddit, Vimeo, Medal, Drive, Dropbox, or a direct .mp4 link";
+  const input = h("textarea", { rows: 1, wrap: "off", class: "link-input", spellcheck: false, autocomplete: "off",
+    placeholder: kind === "music" ? "Paste a music link…" : "Paste a video link, several links, or a playlist…", title: SITES });
+  const grow = () => { input.style.height = "auto"; input.style.height = Math.min(150, input.scrollHeight) + "px";
+    const n = findUrls(input.value).length; go.disabled = !input.value.trim(); go.textContent = n > 1 ? `Get ${n} videos` : "Get video"; };
   const badge = h("span", { class: "src-badge", style: { display: "none" } });
+  const go = h("button", { type: "button", class: "violet sm link-go", disabled: true, onclick: () => { clearTimeout(timer); inspect(); } }, "Get video");
   const card = h("div", { class: "link-card", style: { display: "none" } });
   const AUTO_MAX = 2 * 3600;  // auto-download anything up to 2h; longer VODs wait for a click (pick a part first)
   let seq = 0, timer = null, jobId = null;
@@ -184,7 +187,7 @@ function linkImporter(kind, onImported) {
     const my = ++seq;
     if (!text) return reset();
     const urls = findUrls(text);
-    if (urls.length > 1) return batchFromLinks(urls, my);
+    if (urls.length > 1) { badge.style.display = "none"; return batchFromLinks(urls, my); }
     const url = urls[0] || text;
     let d;
     try { d = await api.get(`/api/url/detect?url=${encodeURIComponent(url)}`); } catch { return; }
@@ -245,7 +248,7 @@ function linkImporter(kind, onImported) {
         if (job.status === "done") {
           status.textContent = job.result.reused ? "Already downloaded. Using your copy." : "✓ Downloaded";
           cancel.style.display = "none"; prog.style.display = "none";
-          onImported(job.result.file); input.value = ""; setTimeout(reset, 2500); break;
+          onImported(job.result.file); input.value = ""; grow(); setTimeout(reset, 2500); break;
         }
         if (["error", "cancelled"].includes(job.status)) {
           status.className = "err small"; status.textContent = job.status === "cancelled" ? "Cancelled" : job.error.replace(/^\w+Error: /, "");
@@ -310,13 +313,13 @@ function linkImporter(kind, onImported) {
       it.paint = () => {
         name.textContent = it.title || it.url;
         if (it.thumbnail && img.src !== it.thumbnail) img.src = it.thumbnail;
-        img.style.visibility = it.thumbnail ? "" : "hidden";
+        img.style.opacity = it.thumbnail ? "" : "0";
         meta.className = it.error ? "err small" : it.done ? "ok small" : "muted small";
         meta.textContent = it.status || [it.icon ? `${it.icon} ${it.label || ""}` : null, it.duration ? hms(it.duration) : null,
           it.already ? "already in library" : null, it.is_live ? "live now" : null, it.loading ? "reading…" : null, it.error].filter(Boolean).join(" · ");
       };
       it.paint();
-      return h("label", { class: "batch-row" }, chk, img, h("div", { style: { minWidth: 0, flex: 1 } }, name, meta, prog));
+      return h("label", { class: "batch-row" }, chk, h("div", { class: "thumbbox" }, img), h("div", { style: { minWidth: 0, flex: 1 } }, name, meta, prog));
     });
     const sel = () => items.filter((x) => x.on);
     const upd = () => {
@@ -378,8 +381,11 @@ function linkImporter(kind, onImported) {
   input.addEventListener("input", () => { grow(); clearTimeout(timer); timer = setTimeout(inspect, 450); });
   input.addEventListener("paste", () => { setTimeout(grow, 0); clearTimeout(timer); timer = setTimeout(inspect, 30); });
   input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); clearTimeout(timer); inspect(); } });
-  const el = h("div", { class: "link-import" }, h("div", { class: "link-row" }, input, badge), card);
-  return { el, setUrl: (u) => { input.value = u; inspect(); } };
+  const row = h("div", { class: "link-row", onclick: (e) => { if (e.target === row) input.focus(); } },
+    h("span", { class: "link-ico", "aria-hidden": "true" }, "🔗"), input, badge, go);
+  const el = h("div", { class: "link-import" }, row,
+    h("div", { class: "link-sites muted small" }, "Works with ", SITES, ". One link per line for a batch."), card);
+  return { el, setUrl: (u) => { input.value = u; grow(); inspect(); } };
 }
 
 function videoPicker(onChange, kind = "uploads") {
