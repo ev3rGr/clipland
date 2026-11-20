@@ -1,0 +1,14 @@
+fastapi
+uvicorn[standard]
+python-multipart
+faster-whisper
+edge-tts>=7
+pillow
+opencv-python-headless<5
+numpy
+httpx
+yt-dlp
+# GPU speech-to-text (ignored on CPU-only machines)
+nvidia-cublas-cu12
+nvidia-cudnn-cu12==9.*
+anthropic

@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Clipland — local AI short-form studio</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='9' fill='%23C6FF3D'/><path d='M12 9l11 7-11 7z' fill='%230B0B10'/></svg>">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <aside class="sidebar">
+    <a class="brand" href="#/home">
+      <span class="brand-mark"><svg viewBox="0 0 32 32"><path d="M12 9l11 7-11 7z"/></svg></span>
+      <span>Clipland</span>
+    </a>
+    <nav id="nav"></nav>
+    <div class="sys" id="sys">Checking system…</div>
+  </aside>
+  <main id="view"></main>
+  <section class="queue" id="queue">
+    <header><span>Queue</span><button class="ghost sm" id="queue-toggle">Hide</button></header>
+    <div id="queue-list"></div>
+  </section>
+  <div id="toast"></div>
+  <script src="app.js"></script>
+</body>
+</html>

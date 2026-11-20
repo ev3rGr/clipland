@@ -1,0 +1,20 @@
+# Python / env
+/.venv/
+__pycache__/
+*.py[cod]
+*.egg-info/
+.env
+.env.*
+
+# Runtime data: uploaded videos, renders, caches, jobs, settings (holds API keys).
+# app/config.py recreates these folders on startup.
+/data/
+
+# Editor / OS / tools
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+.claude/
+node_modules/
+*.log
