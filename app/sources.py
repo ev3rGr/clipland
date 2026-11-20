@@ -56,6 +56,14 @@ def detect(url: str) -> dict:
                 kind = "live" if path.strip("/") and "/" not in path.strip("/") else kind
             if sid == "youtube" and "list" in parse_qs(u.query) and "v" not in parse_qs(u.query):
                 kind = "playlist"
+            elif sid == "youtube" and re.match(r"^/(@[^/]+|channel/[^/]+|c/[^/]+|user/[^/]+)(/(videos|shorts|streams|featured))?/?$", path):
+                kind = "channel"
+            elif sid == "twitch" and re.match(r"^/[^/]+/(videos|clips)/?$", path):
+                kind = "channel"
+            elif sid == "kick" and re.match(r"^/[^/]+/(videos|clips)/?$", path):
+                kind = "channel"
+            elif sid == "tiktok" and re.match(r"^/@[^/]+/?$", path):
+                kind = "channel"
             return {"ok": True, "url": _normalise(sid, url), "source": sid, "label": label, "icon": icon, "kind": kind}
     if path.lower().endswith(DIRECT_EXT):
         return {"ok": True, "url": url, "source": "direct", "label": "Direct file", "icon": "🔗", "kind": "video"}
@@ -75,8 +83,8 @@ def info(url: str, timeout=40) -> dict:
     d = detect(url)
     if not d.get("ok"):
         raise ValueError(d["error"])
-    if d["kind"] == "playlist":
-        raise ValueError("That's a playlist link. Open one video and paste its link.")
+    if d["kind"] in ("playlist", "channel"):
+        raise ValueError("That's a playlist or channel link. Use the batch list to pick videos.")
     try:
         out = subprocess.run([sys.executable, "-m", "yt_dlp", "-J", "--no-playlist", "--no-warnings", "--skip-download", d["url"]],
                              capture_output=True, text=True, timeout=timeout)
@@ -93,6 +101,47 @@ def info(url: str, timeout=40) -> dict:
             "uploader": j.get("uploader") or j.get("channel"), "is_live": bool(j.get("is_live")),
             "max_height": heights[-1] if heights else None, "extractor": j.get("extractor_key"),
             "already": _existing(d["url"])}
+
+
+def playlist(url: str, limit=200, timeout=90) -> dict:
+    """Videos of a playlist / channel page (flat listing: fast, no per-video requests)."""
+    d = detect(url)
+    if not d.get("ok"):
+        raise ValueError(d["error"])
+    try:
+        out = subprocess.run([sys.executable, "-m", "yt_dlp", "-J", "--flat-playlist", "--yes-playlist", "--no-warnings",
+                              "--playlist-end", str(limit), d["url"]], capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired:
+        raise ValueError("Reading the list took too long. Try a smaller playlist or paste the video links.")
+    if out.returncode != 0:
+        msg = (out.stderr.strip().splitlines() or ["unknown error"])[-1].replace("ERROR: ", "")
+        raise ValueError(_friendly(msg))
+    j = json.loads(out.stdout)
+    entries = []
+
+    def walk(items):  # channel pages can nest tabs (Videos / Shorts / Live)
+        for e in items or []:
+            if not e:
+                continue
+            if e.get("_type") == "playlist" and e.get("entries"):
+                walk(e["entries"])
+                continue
+            link = e.get("webpage_url") or e.get("url")
+            if not link:
+                continue
+            if not link.startswith("http") and e.get("ie_key") == "Youtube":
+                link = f"https://www.youtube.com/watch?v={link}"
+            thumbs = e.get("thumbnails") or []
+            entries.append({"url": link, "title": e.get("title") or link, "duration": e.get("duration"),
+                            "thumbnail": e.get("thumbnail") or (thumbs[-1]["url"] if thumbs else None),
+                            "is_live": e.get("live_status") == "is_live", "already": _existing(link)})
+    walk(j.get("entries") if j.get("_type") == "playlist" else [j])
+    seen, uniq = set(), []
+    for e in entries:
+        if e["url"] not in seen:
+            seen.add(e["url"]); uniq.append(e)
+    return {**d, "title": j.get("title"), "uploader": j.get("uploader") or j.get("channel"), "entries": uniq[:limit],
+            "truncated": len(uniq) >= limit}
 
 
 def _friendly(msg):

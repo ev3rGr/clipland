@@ -205,3 +205,16 @@ button:disabled { opacity: .5; cursor: not-allowed; }
 @media (max-width: 600px) { .link-row input { padding-right: 12px; } .src-badge { position: static; margin-left: 6px; } }
 .picker { flex-wrap: wrap; }
 .picker .info { min-width: 160px; }
+
+/* batch selection / downloads */
+.batchbar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+.card .pick { position: absolute; top: 8px; right: 8px; width: 20px; height: 20px; accent-color: var(--accent); z-index: 2; cursor: pointer; }
+.card.picked { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+textarea.link-input { resize: none; min-height: 42px; line-height: 1.4; padding-right: 150px; overflow-y: auto; font: inherit; }
+.batch-list { max-height: 360px; overflow-y: auto; display: flex; flex-direction: column; gap: 6px; padding-right: 4px; }
+.batch-row { display: flex; gap: 10px; align-items: center; padding: 6px; border-radius: 10px; cursor: pointer; }
+.batch-row:hover { background: rgba(255, 255, 255, .03); }
+.batch-row input[type=checkbox] { width: 18px; height: 18px; accent-color: var(--accent); flex: none; }
+.batch-row img { width: 80px; height: 45px; object-fit: cover; border-radius: 6px; background: #000; flex: none; }
+.batch-row .name { font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 600px) { textarea.link-input { padding-right: 12px; } }

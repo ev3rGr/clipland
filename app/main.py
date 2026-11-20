@@ -139,6 +139,67 @@ def url_info(url: str):
         raise HTTPException(400, str(e))
 
 
+@app.get("/api/url/playlist")
+def url_playlist(url: str, limit: int = 200):
+    try:
+        return sources.playlist(url, max(1, min(limit, 500)))
+    except ValueError as e:
+        raise HTTPException(400, str(e))
+
+
+class ZipReq(BaseModel):
+    files: list[str]
+    name: str = "clipland"
+    include_srt: bool = True
+    posts: list[dict] = []
+
+
+@app.post("/api/zip")
+def make_zip(req: ZipReq):
+    """Bundle several files (e.g. exported clips) into one .zip for a single download."""
+    import zipfile
+    paths = []
+    for ref in req.files:
+        try:
+            paths.append(resolve_file(ref))
+        except ValueError:
+            continue
+    if not paths:
+        raise HTTPException(400, "No files to download")
+    d = WORK / "zips"
+    d.mkdir(exist_ok=True)
+    for old in d.glob("*.zip"):
+        if time.time() - old.stat().st_mtime > 3 * 3600:
+            old.unlink(missing_ok=True)
+    out = d / f"{safe_name(req.name)[:40] or 'clipland'}_{time.strftime('%Y%m%d-%H%M')}_{uuid.uuid4().hex[:4]}.zip"
+    names = set()
+    with zipfile.ZipFile(out, "w", zipfile.ZIP_STORED) as z:  # videos are already compressed
+        for p in paths:
+            arc = p.name
+            while arc in names:
+                arc = f"{uuid.uuid4().hex[:3]}_{p.name}"
+            names.add(arc)
+            z.write(p, arc)
+            srt = p.with_suffix(".srt")
+            if req.include_srt and srt != p and srt.exists():
+                z.write(srt, arc.rsplit(".", 1)[0] + ".srt")
+        if req.posts:  # titles / descriptions / hashtags ready to paste when posting
+            lines = []
+            for i, post in enumerate(req.posts, 1):
+                lines += [f"#{i}  {str(post.get('file', '')).split('/')[-1]}", str(post.get("title") or ""),
+                          str(post.get("description") or ""), " ".join(post.get("hashtags") or []), ""]
+            z.writestr("posts.txt", "\n".join(lines))
+    return {"url": f"/zips/{out.name}", "count": len(paths), "size": out.stat().st_size}
+
+
+@app.get("/zips/{name}")
+def zip_file(name: str):
+    p = WORK / "zips" / safe_name(name)
+    if not p.is_file():
+        raise HTTPException(404)
+    return FileResponse(p, media_type="application/zip", filename=p.name)
+
+
 @app.get("/api/probe")
 def probe_file(ref: str):
     try:

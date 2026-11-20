@@ -168,7 +168,9 @@ function uploadFile(file, kind, onProgress) {
 /** Big drag-and-drop video picker with library dropdown. */
 // ---------- paste a link: detect the site, preview, download ----------
 function linkImporter(kind, onImported) {
-  const input = h("input", { type: "url", placeholder: kind === "music" ? "…or paste a link (YouTube, SoundCloud, TikTok…)" : "…or paste a link: YouTube, Twitch, Kick, TikTok, X, Instagram, Drive, direct .mp4…" });
+  const input = h("textarea", { rows: 1, class: "link-input", spellcheck: false,
+    placeholder: kind === "music" ? "…or paste links (YouTube, SoundCloud, TikTok…)" : "…or paste a link, several links, or a playlist/channel: YouTube, Twitch, Kick, TikTok, X, Instagram, Drive…" });
+  const grow = () => { input.style.height = "auto"; input.style.height = Math.min(160, input.scrollHeight) + "px"; };
   const badge = h("span", { class: "src-badge", style: { display: "none" } });
   const card = h("div", { class: "link-card", style: { display: "none" } });
   const AUTO_MAX = 2 * 3600;  // auto-download anything up to 2h; longer VODs wait for a click (pick a part first)
@@ -176,10 +178,14 @@ function linkImporter(kind, onImported) {
   const hms = (x) => { x = Math.round(x || 0); const hh = Math.floor(x / 3600), mm = Math.floor(x % 3600 / 60), ss = x % 60; return (hh ? hh + ":" + String(mm).padStart(2, "0") : mm) + ":" + String(ss).padStart(2, "0"); };
   const reset = () => { badge.style.display = "none"; card.style.display = "none"; card.replaceChildren(); };
 
+  const findUrls = (t) => [...new Set((t.match(/https?:\/\/[^\s"'<>]+/g) || []).map((u) => u.replace(/[),.;]+$/, "")))];
   async function inspect() {
-    const url = input.value.trim();
+    const text = input.value.trim();
     const my = ++seq;
-    if (!url) return reset();
+    if (!text) return reset();
+    const urls = findUrls(text);
+    if (urls.length > 1) return batchFromLinks(urls, my);
+    const url = urls[0] || text;
     let d;
     try { d = await api.get(`/api/url/detect?url=${encodeURIComponent(url)}`); } catch { return; }
     if (my !== seq) return;
@@ -187,7 +193,7 @@ function linkImporter(kind, onImported) {
     badge.style.display = ""; badge.className = "src-badge"; badge.textContent = `${d.icon} ${d.label}${d.kind !== "video" ? " · " + d.kind : ""}`;
     card.style.display = ""; card.replaceChildren(h("div", { class: "muted small" }, h("span", { class: "spin" }), ` Reading ${d.label} link…`));
     if (d.kind === "live") return card.replaceChildren(h("p", { class: "err small" }, `That's a live channel page. Paste a VOD (e.g. twitch.tv/videos/…) or a clip link instead.`));
-    if (d.kind === "playlist") return card.replaceChildren(h("p", { class: "err small" }, "That's a playlist. Open one video and paste its link."));
+    if (d.kind === "playlist" || d.kind === "channel") return batchFromPlaylist(d, my);
     let info;
     try { info = await api.get(`/api/url/info?url=${encodeURIComponent(url)}`); } catch (e) { if (my === seq) card.replaceChildren(h("p", { class: "err small" }, e.message)); return; }
     if (my !== seq) return;
@@ -252,9 +258,126 @@ function linkImporter(kind, onImported) {
     else if (auto && !long && !info.is_live) start();
   }
 
-  input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(inspect, 450); });
-  input.addEventListener("paste", () => { clearTimeout(timer); timer = setTimeout(inspect, 30); });
-  input.addEventListener("keydown", (e) => { if (e.key === "Enter") { clearTimeout(timer); inspect(); } });
+  // ---- batch: several links, or a playlist / channel ----
+  async function batchFromPlaylist(d, my) {
+    card.replaceChildren(h("div", { class: "muted small" }, h("span", { class: "spin" }), ` Reading the ${d.kind}… (big channels take a few seconds)`));
+    let r;
+    try { r = await api.get(`/api/url/playlist?url=${encodeURIComponent(d.url)}`); } catch (e) { if (my === seq) card.replaceChildren(h("p", { class: "err small" }, e.message)); return; }
+    if (my !== seq) return;
+    if (!r.entries.length) return card.replaceChildren(h("p", { class: "err small" }, "No videos found at that link."));
+    const items = r.entries.map((e) => ({ ...e, icon: d.icon, label: d.label, on: false }));
+    drawBatch(`${d.icon} ${r.title || d.label}`, [r.uploader, `${items.length} videos${r.truncated ? " (first " + items.length + ")" : ""}`].filter(Boolean).join(" · "), items);
+  }
+  async function batchFromLinks(urls, my) {
+    const items = urls.map((u) => ({ url: u, title: u, on: true, loading: true }));
+    drawBatch(`${urls.length} links`, "Reading details…", items);
+    let i = 0;
+    const worker = async () => {
+      while (i < items.length && my === seq) {
+        const it = items[i++];
+        try {
+          const d = await api.get(`/api/url/detect?url=${encodeURIComponent(it.url)}`);
+          Object.assign(it, { icon: d.icon, label: d.label });
+          if (!d.ok) throw new Error("Not a link");
+          if (d.kind === "playlist" || d.kind === "channel") throw new Error("playlist/channel: paste it on its own to pick videos");
+          if (d.kind === "live") throw new Error("live channel page: paste a VOD or clip");
+          const info = await api.get(`/api/url/info?url=${encodeURIComponent(it.url)}`);
+          Object.assign(it, { url: info.url || it.url, title: info.title || it.url, duration: info.duration, thumbnail: info.thumbnail, already: info.already, is_live: info.is_live });
+        } catch (e) { it.error = e.message; it.on = false; }
+        it.loading = false;
+        if (my === seq) { it.paint && it.paint(); it.ui && (it.ui.chk.checked = it.on); batchUpd && batchUpd(); }
+      }
+    };
+    await Promise.all([worker(), worker(), worker()]);
+    if (my === seq && batchSub) {
+      const bad = items.filter((x) => x.error).length;
+      batchSub.textContent = `${items.length - bad} ready` + (bad ? ` · ${bad} can't be downloaded` : "");
+    }
+  }
+  let batchUpd = null, batchSub = null;
+  function drawBatch(title, sub, items) {
+    let quality = store.get("dl_quality", "1080"), running = false;
+    const jobIds = new Set();
+    const qSel = h("select", { style: { width: "auto" }, onchange: (e) => { quality = e.target.value; store.set("dl_quality", quality); } },
+      [["2160", "4K"], ["1440", "1440p"], ["1080", "1080p"], ["720", "720p"], ["480", "480p"]].map(([q, l]) => h("option", { value: q, selected: q === quality }, l)));
+    const rows = items.map((it) => {
+      const chk = h("input", { type: "checkbox", checked: !!it.on, onchange: (e) => { it.on = e.target.checked; upd(); } });
+      const img = h("img", { alt: "", referrerpolicy: "no-referrer", loading: "lazy" });
+      const name = h("div", { class: "name" });
+      const meta = h("div", { class: "muted small" });
+      const bar = h("i"), prog = h("div", { class: "progress", style: { display: "none" } }, bar);
+      it.ui = { chk, bar, prog };
+      it.paint = () => {
+        name.textContent = it.title || it.url;
+        if (it.thumbnail && img.src !== it.thumbnail) img.src = it.thumbnail;
+        img.style.visibility = it.thumbnail ? "" : "hidden";
+        meta.className = it.error ? "err small" : it.done ? "ok small" : "muted small";
+        meta.textContent = it.status || [it.icon ? `${it.icon} ${it.label || ""}` : null, it.duration ? hms(it.duration) : null,
+          it.already ? "already in library" : null, it.is_live ? "live now" : null, it.loading ? "reading…" : null, it.error].filter(Boolean).join(" · ");
+      };
+      it.paint();
+      return h("label", { class: "batch-row" }, chk, img, h("div", { style: { minWidth: 0, flex: 1 } }, name, meta, prog));
+    });
+    const sel = () => items.filter((x) => x.on);
+    const upd = () => {
+      const n = sel().length;
+      dlSel.disabled = running || !n; dlSel.textContent = `⬇ Download selected (${n})`;
+      const ok = items.filter((x) => !x.error).length;
+      dlAll.disabled = running || !ok; dlAll.textContent = `⬇ Download all (${ok})`; allBtn.textContent = n === items.length ? "Select none" : "Select all";
+      cancelBtn.style.display = running ? "" : "none";
+    };
+    batchUpd = upd;
+    const allBtn = h("button", { class: "sm", onclick: () => { const on = sel().length !== items.length; items.forEach((x) => { x.on = on; x.ui.chk.checked = on; }); upd(); } }, "Select all");
+    const dlSel = h("button", { class: "sm primary", onclick: () => run(sel()) }, "⬇ Download selected");
+    const dlAll = h("button", { class: "sm violet", onclick: () => { items.forEach((x) => { if (!x.error) { x.on = true; x.ui.chk.checked = true; } }); run(sel()); } }, `⬇ Download all (${items.length})`);
+    const cancelBtn = h("button", { class: "sm", onclick: () => jobIds.forEach((id) => api.post(`/api/jobs/${id}/cancel`).catch(() => {})) }, "Cancel all");
+    const summary = h("div", { class: "muted small" });
+    card.style.display = "";
+    card.replaceChildren(
+      h("div", { class: "btns", style: { justifyContent: "space-between", alignItems: "center" } },
+        h("div", { style: { minWidth: 0 } }, h("div", { class: "name" }, title), batchSub = h("div", { class: "muted small" }, sub)),
+        h("div", { class: "btns", style: { alignItems: "center" } }, kind === "music" ? null : [h("span", { class: "muted small" }, "Quality"), qSel])),
+      h("div", { class: "batch-list" }, rows),
+      h("div", { class: "btns" }, allBtn, dlSel, dlAll, cancelBtn), summary);
+    upd();
+
+    async function run(list) {
+      if (!list.length) return;
+      running = true; upd();
+      const refs = [];
+      const pending = [];
+      for (const it of list) {
+        it.error = null; it.done = false;
+        if (it.already) { it.done = true; it.status = "✓ Already in library"; refs.push(it.already); it.paint(); continue; }
+        try {
+          const job = await api.post("/api/jobs/import_url", { params: { url: it.url, kind, quality } });
+          it.jobId = job.id; jobIds.add(job.id); trackJob(job, {});
+          it.status = "Queued"; it.ui.prog.style.display = ""; it.ui.bar.style.width = "1%"; pending.push(it);
+        } catch (e) { it.error = e.message; }
+        it.paint();
+      }
+      while (pending.some((x) => !x.finished)) {
+        await new Promise((r) => setTimeout(r, 1000));
+        await Promise.all(pending.filter((x) => !x.finished).map(async (it) => {
+          let job; try { job = await api.get(`/api/jobs/${it.jobId}`); } catch { return; }
+          it.ui.bar.style.width = Math.max(1, job.progress * 100) + "%";
+          it.status = job.status === "queued" ? "Queued (2 download at a time)" : (job.message || "");
+          if (job.status === "done") { it.finished = it.done = true; it.status = job.result.reused ? "✓ Already in library" : "✓ Downloaded"; it.already = job.result.file; refs.push(job.result.file); it.ui.prog.style.display = "none"; }
+          else if (job.status === "error" || job.status === "cancelled") { it.finished = true; it.status = null; it.error = job.status === "cancelled" ? "Cancelled" : job.error.replace(/^\w+Error: /, ""); it.ui.prog.style.display = "none"; }
+          it.paint();
+        }));
+        summary.textContent = `${pending.filter((x) => x.finished).length}/${pending.length} finished`;
+      }
+      running = false; jobIds.clear(); upd();
+      const failed = list.filter((x) => x.error).length;
+      summary.textContent = `✓ ${refs.length} in your library` + (failed ? ` · ${failed} failed` : "");
+      if (refs.length) onImported(refs[0], refs);
+    }
+  }
+
+  input.addEventListener("input", () => { grow(); clearTimeout(timer); timer = setTimeout(inspect, 450); });
+  input.addEventListener("paste", () => { setTimeout(grow, 0); clearTimeout(timer); timer = setTimeout(inspect, 30); });
+  input.addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); clearTimeout(timer); inspect(); } });
   const el = h("div", { class: "link-import" }, h("div", { class: "link-row" }, input, badge), card);
   return { el, setUrl: (u) => { input.value = u; inspect(); } };
 }
@@ -296,7 +419,8 @@ function videoPicker(onChange, kind = "uploads") {
     prog.style.display = "none";
   };
   input.onchange = () => input.files[0] && doUpload(input.files[0]);
-  const link = linkImporter(kind, async (ref) => {
+  const link = linkImporter(kind, async (ref, refs) => {
+    if (refs && refs.length > 1) toast(`${refs.length} videos added to your library. Selected the first one; pick others from the list.`);
     await fill();
     const f = S.files[kind].find((x) => x.ref === ref) || { ref, name: ref.split("/").pop().split("_").slice(1).join("_") };
     try { Object.assign(f, await api.get(`/api/probe?ref=${encodeURIComponent(ref)}`)); } catch {}
@@ -333,6 +457,50 @@ function outputCard(o) {
     h("div", { class: "btns" }, h("a", { href: media(o.file), download: "" }, h("button", { class: "sm primary" }, "Download")),
       o.srt ? h("a", { href: media(o.srt), download: "" }, h("button", { class: "sm" }, "SRT")) : null,
       o.description || o.hashtags?.length ? h("button", { class: "sm", onclick: () => { navigator.clipboard?.writeText(`${o.title}\n\n${o.description || ""}\n\n${(o.hashtags || []).join(" ")}`); toast("Caption copied"); } }, "Copy post text") : null)));
+}
+
+// ---------- batch select + download for galleries ----------
+// items: [{ card, file, post? , onDelete? }]
+function selectableGallery(items, { name = "clipland", deletable = false } = {}) {
+  const sel = new Set();
+  const cnt = h("b", {}, "0");
+  const save = (url, filename) => { const a = h("a", { href: url, download: filename || "" }); document.body.append(a); a.click(); a.remove(); };
+  async function download(list, btn) {
+    if (!list.length) return toast("Select at least one file", true);
+    if (list.length === 1) return save(media(list[0].file));
+    const label = btn.textContent; btn.disabled = true; btn.innerHTML = '<span class="spin"></span> Zipping…';
+    try {
+      const posts = list.map((x) => x.post).filter((p) => p && (p.title || p.description || p.hashtags?.length));
+      const r = await api.post("/api/zip", { files: list.map((x) => x.file), name, posts });
+      save(r.url); toast(`Downloading ${r.count} files (${fmtSize(r.size)})`);
+    } catch (e) { toast(e.message, true); }
+    btn.disabled = false; btn.textContent = label;
+  }
+  const paint = () => {
+    cnt.textContent = sel.size;
+    dlSel.disabled = !sel.size; if (delSel) delSel.disabled = !sel.size;
+    dlSel.textContent = `⬇ Download selected (${sel.size})`;
+    allBtn.textContent = sel.size === items.length ? "Clear selection" : "Select all";
+  };
+  items.forEach((it) => {
+    const cb = h("input", { type: "checkbox", class: "pick", title: "Select", onclick: (e) => e.stopPropagation(),
+      onchange: (e) => { e.target.checked ? sel.add(it) : sel.delete(it); it.card.classList.toggle("picked", e.target.checked); paint(); } });
+    it.cb = cb;
+    (it.card.querySelector(".media") || it.card).append(cb);
+  });
+  const setAll = (on) => items.forEach((it) => { it.cb.checked = on; it.card.classList.toggle("picked", on); on ? sel.add(it) : sel.delete(it); });
+  const allBtn = h("button", { class: "sm", onclick: () => { setAll(sel.size !== items.length); paint(); } }, "Select all");
+  const dlSel = h("button", { class: "sm primary", onclick: () => download(items.filter((x) => sel.has(x)), dlSel) }, "⬇ Download selected (0)");
+  const dlAll = h("button", { class: "sm violet", onclick: () => download(items, dlAll) }, `⬇ Download all (${items.length})`);
+  const delSel = deletable ? h("button", { class: "sm ghost danger", onclick: async () => {
+    const list = items.filter((x) => sel.has(x));
+    if (!list.length || !confirm(`Delete ${list.length} file(s)? This can't be undone.`)) return;
+    for (const x of list) { try { await api.del(`/api/files?ref=${encodeURIComponent(x.file)}`); } catch (e) { toast(e.message, true); } }
+    route();
+  } }, "Delete selected") : null;
+  const bar = h("div", { class: "batchbar" }, allBtn, dlSel, dlAll, delSel, h("span", { class: "muted small" }, items.length > 1 ? "Several files download as one .zip (with captions and a posts.txt of titles + hashtags)." : ""));
+  paint();
+  return h("div", {}, items.length > 1 ? bar : null, h("div", { class: "gallery" }, items.map((x) => x.card)));
 }
 
 // ---------- job queue ----------
@@ -391,7 +559,8 @@ async function startJob(kind, params, opts = {}) {
 }
 function showResults(el, outputs) {
   if (!outputs?.length) return;
-  el.replaceChildren(h("h2", {}, "Results"), h("div", { class: "gallery" }, outputs.map(outputCard)));
+  el.replaceChildren(h("h2", {}, "Results"), selectableGallery(outputs.map((o) => ({ card: outputCard(o), file: o.file,
+    post: { file: o.file, title: o.title, description: o.description, hashtags: o.hashtags } })), { name: "clips" }));
   el.scrollIntoView({ behavior: "smooth", block: "nearest" });
 }
 
@@ -888,23 +1057,24 @@ PAGES.library = async (v, arg) => {
       upBtn.textContent = "Upload files"; route();
     } });
     const upBtn = h("button", { class: "violet", onclick: () => up.click() }, "Upload files");
-    const imp = linkImporter(kind, () => { toast("Imported"); setTimeout(route, 1200); });
+    const imp = linkImporter(kind, (ref, refs) => { toast(refs && refs.length > 1 ? `Imported ${refs.length} files` : "Imported"); setTimeout(route, 1500); });
     v.append(h("div", { class: "panel", style: { marginBottom: "18px" } }, h("div", { class: "row", style: { alignItems: "flex-start" } }, upBtn, up, h("div", { style: { flex: 1, minWidth: "240px" } }, imp.el)),
       kind === "backgrounds" ? h("p", { class: "muted small", style: { marginBottom: 0 } }, "Tip: add a few long gameplay or satisfying clips here — story and text videos pick random segments from them.") : null));
   }
   let files = await loadFiles(kind, true);
   if (kind === "outputs") files = files.filter((f) => !/\.(srt)$/.test(f.ref));
-  v.append(files.length ? h("div", { class: "gallery" }, files.map((f) => {
+  v.append(files.length ? selectableGallery(files.map((f) => {
     const isVid = /\.(mp4|mov|mkv|webm|m4v|avi)$/i.test(f.ref);
     const isAud = /\.(mp3|wav|m4a|ogg|flac)$/i.test(f.ref);
     const m = h("div", { class: "media" + (kind === "outputs" ? "" : " wide") });
     if (isVid) m.append(h("video", { src: f.url, controls: true, preload: "none", poster: f.thumb }));
     else if (isAud) m.append(h("div", { style: { display: "grid", placeItems: "center", height: "100%", padding: "8px" } }, h("audio", { src: f.url, controls: true, preload: "none", style: { width: "100%" } })));
     else m.append(h("img", { class: "full", src: f.url }));
-    return h("div", { class: "card" }, m, h("div", { class: "body" }, h("div", { class: "title", title: f.name }, f.name), h("div", { class: "meta" }, h("span", {}, fmtSize(f.size)), h("span", {}, new Date(f.mtime * 1000).toLocaleDateString())),
+    const card = h("div", { class: "card" }, m, h("div", { class: "body" }, h("div", { class: "title", title: f.name }, f.name), h("div", { class: "meta" }, h("span", {}, fmtSize(f.size)), h("span", {}, new Date(f.mtime * 1000).toLocaleDateString())),
       h("div", { class: "btns" }, h("a", { href: f.url, download: "" }, h("button", { class: "sm" }, "Download")),
         h("button", { class: "sm ghost danger", onclick: async () => { if (confirm("Delete " + f.name + "?")) { await api.del(`/api/files?ref=${encodeURIComponent(f.ref)}`); route(); } } }, "Delete"))));
-  })) : h("div", { class: "empty" }, "Nothing here yet."));
+    return { card, file: f.ref };
+  }), { name: kind === "outputs" ? "exports" : kind, deletable: true }) : h("div", { class: "empty" }, "Nothing here yet."));
 };
 
 PAGES.calc = (v) => {
