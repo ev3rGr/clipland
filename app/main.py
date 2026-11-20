@@ -7,13 +7,14 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import jobs, llm, tts, captions, transcribe, settings, presets, sources, gpu
+from . import jobs, llm, tts, captions, transcribe, settings, presets, sources, gpu, archive
 from .config import FILE_KINDS, FONTS, OUTPUTS, STATIC, WORK, resolve_file
 from .media import probe, safe_name, thumbnail, encoder_name, run as run_cmd
 from .pipelines import autoclip, stories, tools  # noqa: F401  (registers job handlers)
 
 app = FastAPI(title="Clipland")
 jobs.load_all()
+archive.backfill()
 
 MEDIA_EXT = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".mp3", ".wav", ".m4a", ".ogg", ".flac", ".gif", ".jpg", ".png"}
 
@@ -26,6 +27,12 @@ def _file_info(kind, p):
         sib = p.with_suffix(".jpg")
         if sib.exists() and sib != p:
             d["thumb"] = f"/media/outputs/{sib.name}"
+        srt = p.with_suffix(".srt")
+        if srt.exists():
+            d["srt"] = f"outputs/{srt.name}"
+        meta = archive.read(p)
+        if meta:
+            d["meta"] = meta
     elif thumb.exists():
         d["thumb"] = f"/thumbs/{thumb.name}"
     return d
@@ -183,11 +190,20 @@ def make_zip(req: ZipReq):
             srt = p.with_suffix(".srt")
             if req.include_srt and srt != p and srt.exists():
                 z.write(srt, arc.rsplit(".", 1)[0] + ".srt")
-        if req.posts:  # titles / descriptions / hashtags ready to paste when posting
+        posts = req.posts or [dict(m, file=f"outputs/{p.name}") for p in paths
+                              if p.parent == OUTPUTS and (m := archive.read(p))]
+        posts = [x for x in posts if x.get("description") or x.get("hashtags") or x.get("score") is not None]
+        if posts:  # titles / descriptions / hashtags ready to paste when posting
             lines = []
-            for i, post in enumerate(req.posts, 1):
-                lines += [f"#{i}  {str(post.get('file', '')).split('/')[-1]}", str(post.get("title") or ""),
-                          str(post.get("description") or ""), " ".join(post.get("hashtags") or []), ""]
+            for i, post in enumerate(posts, 1):
+                head = f"#{i}  {str(post.get('file', '')).split('/')[-1]}"
+                if post.get("score") is not None:
+                    head += f"   (score {post['score']})"
+                lines += [head, str(post.get("title") or ""), str(post.get("description") or ""),
+                          " ".join(post.get("hashtags") or [])]
+                if post.get("reason"):
+                    lines.append(f"Why: {post['reason']}")
+                lines.append("")
             z.writestr("posts.txt", "\n".join(lines))
     return {"url": f"/zips/{out.name}", "count": len(paths), "size": out.stat().st_size}
 
@@ -215,7 +231,7 @@ def delete_file(ref: str):
     except ValueError as e:
         raise HTTPException(404, str(e))
     p.unlink()
-    for sib in (p.with_suffix(".jpg"), p.with_suffix(".srt")):
+    for sib in (p.with_suffix(".jpg"), p.with_suffix(".srt"), p.with_suffix(".json")):
         if sib != p and sib.parent == OUTPUTS:
             sib.unlink(missing_ok=True)
     return {"ok": True}

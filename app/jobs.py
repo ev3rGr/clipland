@@ -104,6 +104,12 @@ def _run(job: Job):
         job.message = "Failed"
     job.finished = time.time()
     save(job)
+    if job.status == "done":
+        try:
+            from . import archive
+            archive.save_job_outputs(job)
+        except Exception as e:
+            print("[archive]", e)
     if job.kind in GPU_KINDS:
         _maybe_release(job)
 

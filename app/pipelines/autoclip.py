@@ -301,7 +301,8 @@ def render_clip(job, path, info, clip, idx, style, position, layout, title_mode,
     framing = plan.get("mode", "center") + (" + split" if plan.get("split") else "")
     return output_entry(out, title or f"Clip {idx}", score=clip.get("score"), start=start, end=end,
                         srt=f"outputs/{srt.name}" if words else None, framing=framing,
-                        description=clip.get("description", ""), hashtags=clip.get("hashtags", []))
+                        description=clip.get("description", ""), hashtags=clip.get("hashtags", []),
+                        reason=clip.get("reason"), text=(clip.get("text") or "")[:600] or None, engine=clip.get("source"))
 
 
 def render(job, file, clips, style="bold", position="lower", reframe_mode="auto", title_mode="intro",

@@ -17,7 +17,7 @@ sites, but everything runs on your own machine. There are no credits, no waterma
 | **AI Voiceover** | Narrate a script over your video, a background, or export MP3 only. | edge-tts |
 | **Auto Captions** | Burn 5 animated caption styles into any video, keep its size or convert it to 9:16, and export an `.srt`. | faster-whisper |
 | **Free Tools** | Trim, compress (to a target MB), GIF, speed, reverse, mute, MP3, MP4, merge, aspect ratio, volume boost, speech enhancer, loudness balance, frame grab | ffmpeg |
-| **Library** | Uploads, background gameplay, music, exports. Select files to download or delete. Several files download as one `.zip`. | |
+| **Library** | Uploads, background gameplay, music, exports. Exports keep everything generated with them (score, title, description, hashtags, why it was picked, source and settings), saved as `data/outputs/<name>.json`. Select files to download or delete. Several files download as one `.zip` with a `posts.txt`. The home page shows a plain history. | |
 | **Calculators** | Views→money, CPM/RPM, posts to 1M views, clips per video, campaign payouts | |
 
 ## Add videos from a link

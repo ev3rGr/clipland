@@ -13,4 +13,4 @@ if command -v ollama >/dev/null && ! ollama list 2>/dev/null | grep -q .; then
 fi
 PORT="${PORT:-8000}"
 echo "Clipland running at http://localhost:$PORT"
-exec .venv/bin/uvicorn app.main:app --host "${HOST:-127.0.0.1}" --port "$PORT"
+exec .venv/bin/uvicorn app.main:app --host "${HOST:-0.0.0.0}" --port "$PORT"

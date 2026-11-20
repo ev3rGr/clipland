@@ -449,21 +449,54 @@ function videoPicker(onChange, kind = "uploads") {
   return w;
 }
 
-function outputCard(o) {
+function outputMedia(o, { lazy = false } = {}) {
   const isVid = /\.(mp4|webm|mov)$/i.test(o.file), isAud = /\.(mp3|wav|m4a)$/i.test(o.file), isImg = /\.(gif|jpg|png)$/i.test(o.file);
   const m = h("div", { class: "media" + (isAud ? " wide" : "") });
-  if (isVid) m.append(h("video", { src: media(o.file), controls: true, preload: "metadata", poster: o.thumb ? media(o.thumb) : undefined, playsInline: true }));
-  else if (isImg) m.append(h("img", { class: "full", src: media(o.file) }));
-  else if (isAud) m.append(h("div", { style: { display: "grid", placeItems: "center", height: "100%", padding: "10px" } }, h("audio", { src: media(o.file), controls: true, style: { width: "100%" } })));
-  if (o.score) m.append(h("span", { class: "badge" }, o.score));
+  if (isVid) m.append(h("video", { src: media(o.file), controls: true, preload: lazy ? "none" : "metadata", poster: o.thumb ? media(o.thumb) : undefined, playsInline: true }));
+  else if (isImg) m.append(h("img", { class: "full", src: media(o.file), loading: "lazy" }));
+  else if (isAud) m.append(h("div", { style: { display: "grid", placeItems: "center", height: "100%", padding: "10px" } }, h("audio", { src: media(o.file), controls: true, preload: "none", style: { width: "100%" } })));
+  return m;
+}
+const outName = (o) => o.title || o.file.split("/").pop();
+const postText = (o) => `${o.title || ""}\n\n${o.description || ""}\n\n${(o.hashtags || []).join(" ")}`.trim();
+const fmtDate = (t) => { const d = new Date(t * 1000); return d.toLocaleDateString(undefined, { month: "short", day: "numeric" }) + " " + d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }); };
+
+/** Full export card: everything generated with the clip (score, title, description, hashtags, why it was picked…).
+ *  Used right after generating and in the Library archive. */
+function outputCard(o, { onDelete } = {}) {
+  const m = outputMedia(o, { lazy: !!onDelete });
+  if (o.score != null && o.score !== "") m.append(h("span", { class: "badge", title: "Virality score" }, o.score));
+  const hasPost = o.description || o.hashtags?.length;
+  const details = [
+    o.reason ? ["Why this clip", o.reason] : null,
+    o.source_name ? ["Source", o.source_name + (o.start != null ? ` @ ${fmtTime(o.start)}–${fmtTime(o.end)}` : "")] : null,
+    o.content_type || o.framing || o.engine ? ["Settings", [o.content_type, o.framing && "framing: " + o.framing, o.engine && "picked by: " + o.engine].filter(Boolean).join(" · ")] : null,
+    o.text && !(o.reason && o.text.includes(o.reason.slice(0, 40))) ? ["Transcript", o.text] : null,
+  ].filter(Boolean);
   return h("div", { class: "card" }, m, h("div", { class: "body" },
-    h("div", { class: "title", title: o.title }, o.title || o.file.split("/").pop()),
-    h("div", { class: "meta" }, h("span", {}, o.duration ? fmtTime(o.duration) : ""), h("span", {}, o.start != null ? `${fmtTime(o.start)}–${fmtTime(o.end)}` : ""), o.framing ? h("span", { title: "Framing used" }, o.framing) : null),
-    o.description || o.hashtags?.length ? h("div", { class: "desc" }, o.description || "", " ", h("span", { class: "tags" }, (o.hashtags || []).join(" "))) : null,
+    h("div", { class: "title", title: outName(o) }, outName(o)),
+    h("div", { class: "meta" }, h("span", {}, o.duration ? fmtTime(o.duration) : ""), h("span", {}, o.start != null ? `${fmtTime(o.start)}–${fmtTime(o.end)}` : ""),
+      o.made_with ? h("span", {}, o.made_with) : null, o.created ? h("span", { title: new Date(o.created * 1000).toLocaleString() }, fmtDate(o.created)) : null),
+    hasPost ? h("div", { class: "desc" }, o.description || "", " ", h("span", { class: "tags" }, (o.hashtags || []).join(" "))) : null,
+    details.length ? h("details", { class: "why" }, h("summary", {}, "More details"),
+      details.map(([k, val]) => h("div", { class: "why-row" }, h("b", {}, k), h("span", {}, val)))) : null,
     h("div", { class: "btns" }, h("a", { href: media(o.file), download: "" }, h("button", { class: "sm primary" }, "Download")),
       o.srt ? h("a", { href: media(o.srt), download: "" }, h("button", { class: "sm" }, "SRT")) : null,
-      o.description || o.hashtags?.length ? h("button", { class: "sm", onclick: () => { navigator.clipboard?.writeText(`${o.title}\n\n${o.description || ""}\n\n${(o.hashtags || []).join(" ")}`); toast("Caption copied"); } }, "Copy post text") : null)));
+      hasPost ? h("button", { class: "sm", onclick: () => { navigator.clipboard?.writeText(postText(o)); toast("Post text copied"); } }, "Copy post text") : null,
+      onDelete ? h("button", { class: "sm ghost danger", onclick: onDelete }, "Delete") : null)));
 }
+
+/** Compact card for the home history: just the video, its name and when it was made. */
+function historyCard(o) {
+  return h("div", { class: "card hist" }, outputMedia(o, { lazy: true }), h("div", { class: "body" },
+    h("div", { class: "title", title: outName(o) }, outName(o)),
+    h("div", { class: "meta" }, h("span", {}, [o.made_with, o.duration ? fmtTime(o.duration) : null].filter(Boolean).join(" · ")),
+      h("span", {}, o.created ? fmtDate(o.created) : ""))));
+}
+
+/** Library file entry (outputs) → the same shape the generators return, with the saved metadata merged in. */
+const exportFromFile = (f) => ({ ...(f.meta || {}), file: f.ref, thumb: f.thumb ? f.thumb.replace(/^\/media\//, "") : f.meta?.thumb,
+  srt: f.srt || f.meta?.srt, title: f.meta?.title || f.name, created: f.meta?.created || f.mtime });
 
 // ---------- batch select + download for galleries ----------
 // items: [{ card, file, post? , onDelete? }]
@@ -579,9 +612,9 @@ PAGES.home = async (v) => {
     h("div", { class: "hero" }, ROUTES.filter((r) => r.desc).map((r) =>
       h("a", { class: "tile", href: "#/" + r.id }, h("div", { class: "ico", style: { background: r.color }, html: icon(r.id) }), h("h3", {}, r.label), h("p", {}, r.desc)))));
   const outs = h("div", { class: "gallery" });
-  v.append(h("div", { class: "btns", style: { justifyContent: "space-between", marginBottom: "14px" } }, h("h2", { style: { margin: 0 } }, "Recent exports"), h("a", { href: "#/library" }, h("button", { class: "sm" }, "Open library"))), outs);
-  const files = (await loadFiles("outputs", true)).filter((f) => /\.(mp4|gif)$/.test(f.ref)).slice(0, 10);
-  outs.replaceWith(files.length ? h("div", { class: "gallery" }, files.map((f) => outputCard({ file: f.ref, title: f.name, thumb: f.thumb?.replace("/media/", "") })))
+  v.append(h("div", { class: "btns", style: { justifyContent: "space-between", marginBottom: "14px" } }, h("h2", { style: { margin: 0 } }, "History"), h("a", { href: "#/library/outputs" }, h("button", { class: "sm" }, "All exports + details"))), outs);
+  const files = (await loadFiles("outputs", true)).filter((f) => /\.(mp4|gif|mp3)$/.test(f.ref)).slice(0, 12);
+  outs.replaceWith(files.length ? h("div", { class: "gallery" }, files.map((f) => historyCard(exportFromFile(f))))
     : h("div", { class: "empty" }, "Nothing exported yet — start with AutoClip or a Story video."));
 };
 
@@ -1069,6 +1102,14 @@ PAGES.library = async (v, arg) => {
   }
   let files = await loadFiles(kind, true);
   if (kind === "outputs") files = files.filter((f) => !/\.(srt)$/.test(f.ref));
+  if (kind === "outputs") {
+    const del = (f) => async () => { if (confirm("Delete " + (f.meta?.title || f.name) + "?")) { await api.del(`/api/files?ref=${encodeURIComponent(f.ref)}`); route(); } };
+    v.append(files.length ? selectableGallery(files.map((f) => {
+      const o = exportFromFile(f);
+      return { card: outputCard(o, { onDelete: del(f) }), file: f.ref };
+    }), { name: "exports", deletable: true }) : h("div", { class: "empty" }, "Nothing exported yet."));
+    return;
+  }
   v.append(files.length ? selectableGallery(files.map((f) => {
     const isVid = /\.(mp4|mov|mkv|webm|m4v|avi)$/i.test(f.ref);
     const isAud = /\.(mp3|wav|m4a|ogg|flac)$/i.test(f.ref);
