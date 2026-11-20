@@ -44,6 +44,7 @@ def get_transcript(path, job, p0, p1, language=None, duration=None):
     run(["ffmpeg", "-i", path, "-vn", "-ac", "1", "-ar", "16000", wav])
     t = transcribe.transcribe(wav, job, p0, p1, language=language, duration=duration)
     save_json(cache, t)
+    transcribe.unload()  # analysis/rendering that follows doesn't need Whisper: give the VRAM back
     return t
 
 

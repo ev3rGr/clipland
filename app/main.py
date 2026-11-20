@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
-from . import jobs, llm, tts, captions, transcribe, settings, presets, sources
+from . import jobs, llm, tts, captions, transcribe, settings, presets, sources, gpu
 from .config import FILE_KINDS, FONTS, OUTPUTS, STATIC, WORK, resolve_file
 from .media import probe, safe_name, thumbnail, encoder_name, run as run_cmd
 from .pipelines import autoclip, stories, tools  # noqa: F401  (registers job handlers)
@@ -35,7 +35,16 @@ def _file_info(kind, p):
 def status():
     provider, model = llm.current()
     return {"llm_provider": provider, "llm_provider_label": llm.PROVIDER_LABELS.get(provider, provider),
-            "llm_model": model, "whisper": transcribe.model_info(), "encoder": encoder_name(), "tools": tools.TOOLS}
+            "llm_model": model, "whisper": transcribe.model_info(), "encoder": encoder_name(), "tools": tools.TOOLS,
+            "vram": gpu.vram()}
+
+
+@app.post("/api/gpu/release")
+def gpu_release():
+    busy = [j for j in jobs.listing() if j["status"] == "running" and j["kind"] in jobs.GPU_KINDS]
+    if busy:
+        raise HTTPException(409, "A job is using the GPU right now. Try again when it finishes.")
+    return gpu.release("manual")
 
 
 @app.get("/api/settings")

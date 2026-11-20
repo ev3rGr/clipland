@@ -104,6 +104,25 @@ def _run(job: Job):
         job.message = "Failed"
     job.finished = time.time()
     save(job)
+    if job.kind in GPU_KINDS:
+        _maybe_release(job)
+
+
+# jobs that load models on the GPU (Whisper, Ollama). When the heavy lane goes idle after one of them,
+# the models are unloaded so VRAM is free for games, the browser, or the next run.
+GPU_KINDS = {"analyze", "render_clips", "autoclip", "captions", "reddit", "faketext", "voiceover"}
+
+
+def _maybe_release(job):
+    with _lock:
+        pending = [j for j in _jobs.values() if j is not job and j.kind not in NET_KINDS and j.status in ("queued", "running")]
+    if pending:  # another heavy job is about to run: keep models warm for it
+        return
+    try:
+        from . import gpu
+        gpu.release(f"{job.kind} {job.id}")
+    except Exception as e:
+        print("[gpu] release failed:", e)
 
 
 def get(job_id) -> Job | None:

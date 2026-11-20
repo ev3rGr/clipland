@@ -78,7 +78,10 @@ For speech-to-text, use local faster-whisper (tiny → large-v3) or a cloud Whis
 
 ## Requirements
 - `ffmpeg`, Python 3.10+, and [`uv`](https://docs.astral.sh/uv/). `run.sh` creates `.venv` the first time it runs.
-- Optional: an NVIDIA GPU, which is used automatically for Whisper and for NVENC encoding.
+- Optional: an NVIDIA GPU, which is used automatically for Whisper and for NVENC encoding. VRAM is freed automatically:
+  - Whisper is unloaded as soon as a full transcript is done.
+  - When the job queue goes idle, Whisper and any Ollama models are unloaded. Back-to-back jobs keep them loaded so they don't reload each time.
+  - The sidebar shows VRAM in use, and **free** unloads everything on demand.
 - Optional: [Ollama](https://ollama.com) with a small model (`ollama pull qwen2.5:3b`). It powers AI moment picking and
   the "Write with AI" buttons. Without it, AutoClip falls back to the built-in heuristic scorer.
 - Voices use Microsoft Edge's free online TTS (`edge-tts`), so generating voiceovers needs internet access. Everything else works offline.
@@ -100,6 +103,7 @@ app/moments.py           podcast moment finder (LLM + heuristic)
 app/signals.py           gameplay/trailer highlight detection (audio, motion, cuts, reactions)
 app/presets.py           AutoClip content types and their defaults
 app/sources.py           link detection + yt-dlp downloads
+app/gpu.py               VRAM status + unloading Whisper / Ollama models
 app/reframe.py           speaker-aware 9:16 reframing (YuNet, shot detection, split screen)
 app/captions.py          animated ASS caption styles
 app/tts.py               edge-tts with word timings

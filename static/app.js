@@ -350,6 +350,7 @@ async function pollJobs() {
       x.job = await api.get(`/api/jobs/${x.job.id}`);
       if (x.job.status === "done") {
         toast("✓ " + jobLabel(x.job) + " finished");
+        setTimeout(refreshStatus, 1500);
         if (x.results) showResults(x.results, x.job.result.outputs);
         x.onDone && x.onDone(x.job.result);
         delete S.files.outputs;
@@ -1035,6 +1036,16 @@ async function refreshStatus() {
     $("#sys").innerHTML = `<div><span class="dot"></span>Encoder <b>${st.encoder}</b></div>
       <div><span class="dot ${st.llm_model ? "" : "off"}"></span>AI <b>${st.llm_model || "not set"}</b> · ${st.llm_provider_label}</div>
       <div><span class="dot"></span>Whisper <b>${st.whisper.size}</b> · ${st.whisper.device}</div>`;
+    if (st.vram) {
+      const pct = Math.round(st.vram.used / st.vram.total * 100);
+      $("#sys").append(h("div", { title: "GPU memory in use. Models are unloaded automatically when jobs finish." },
+        h("span", { class: "dot" + (pct > 85 ? " off" : "") }), "VRAM ", h("b", {}, `${(st.vram.used / 1024).toFixed(1)}/${(st.vram.total / 1024).toFixed(1)} GB`), " ",
+        h("a", { href: "#", style: { color: "var(--accent)" }, onclick: async (e) => {
+          e.preventDefault();
+          try { const r = await api.post("/api/gpu/release"); toast(`GPU freed: ${r.before?.used ?? "?"} → ${r.after?.used ?? "?"} MB`); } catch (err) { toast(err.message, true); }
+          refreshStatus();
+        } }, "free")));
+    }
   } catch { $("#sys").textContent = "Server offline"; }
 }
 

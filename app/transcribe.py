@@ -59,6 +59,19 @@ def get_model(size=None):
         return _model
 
 
+def unload():
+    """Drop the Whisper model so its VRAM is freed. Returns True if one was loaded."""
+    global _model
+    import gc
+    with _lock:
+        if _model is None:
+            return False
+        _model = None
+        _model_info.clear()
+    gc.collect()
+    return True
+
+
 def model_info():
     cfg = settings.get()["transcribe"]
     if cfg["provider"] == "openai_compat":
